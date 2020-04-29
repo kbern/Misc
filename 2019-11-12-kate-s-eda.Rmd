@@ -1,0 +1,146 @@
+---
+title: "Are Crimes in Boston affected by Weather Patterns EDA"
+author: 'Katherine Bernstein'
+date: '2019-11-12'
+description: 'Katherine Bernsteins initial EDA exploring the patterns between Boston
+  Crimes and Weather patterns'
+featured_image: ''
+slug: kate-s-eda
+tags: []
+categories: []
+---
+I am interested in looking at potential relationships between the number of crimes in Boston and weather patterns. In order to do this, I need to use our original Boston Crimes dataset and join it with a dataset on weather patterns in Boston. 
+
+I started my initial EDA by attatching the packages "tidyverse" and "stringr". 
+
+```{r 1}
+#Attatch packages
+library(tidyverse)
+library(stringr)
+```
+
+
+I loaded in the primary dataset we are analyzing, on the crimes in Boston from 2015 to 2018
+```{r 2}
+#Read in Boston Crime dataset and check for problems
+bos_crimes <- read_csv("data/crime.csv") %>% select(-(SHOOTING))
+problems(bos_crimes)
+```
+For this EDA, I decided to test if there are any patterns between the crimes in Boston and the weather. To do this, I found a weather dataset on Kaggle that includes data on temparature, wind chill, humidity, and other environmental markers from 2008 to 2018.
+```{r 3}
+# Read in Boston Weather dataset and check for problems
+# https://www.kaggle.com/jqpeng/boston-weather-data-jan-2013-apr-2018
+bos_weather <- read_csv("data/bos_weather.csv") 
+problems(bos_weather)
+```
+
+In order to use the weather dataset along with the crimes dataset, I needed to join the two datasets on the date. Unfortunately, the date in the crime dataset and the date in the weather dataset were in different formats. In the weather dataset, the single digit numbers for month and day did not have a 0 in front of it. I altered this by changing "7" (for example) as the month or day to "07".
+
+```{r 4}
+
+#If the month is not 10, 11, or 12, place a 0 in front of the number
+bos_weather <- bos_weather %>% mutate(New_month = ifelse(Month != '12' & Month != '11' & Month != '10', paste0("0",Month), Month))
+
+# If a day is number 1-9 place a 0 in front of it
+bos_weather <- bos_weather %>% mutate(New_day = ifelse(Day == '1' | Day == '2' | Day == '3' | Day == '4' | Day == '5' | Day == '6' | Day == '7' | Day == '8' | Day == '9' , paste0("0",Day), Day))
+
+```
+
+Since the month, day, and year in the weather dataset were in separate columns, I united them to mimick the "09-20-2017" format of the Boston crimes dataset.
+```{r 5}
+# Create a date column in the weather dataset that matches the crimes date column by uniting columns
+bos_weather <- bos_weather %>% unite(Date, Year, New_month, New_day,sep = "-")
+
+```
+
+
+Below I altered the OCCURED_ON_DATE column in the Boston crimes dataset to mimick the altered date column in the weather dataset and put it in a "Date" variable.
+```{r 6}
+#Create a date column in boston crimes that matches the date column in the weather dataset
+bos_crimes <- bos_crimes %>% mutate(Date = substr(OCCURRED_ON_DATE, 1,10))
+```
+
+Since the weather dataset went all the way back to 2008, I filtered it out to only go as far back as 2015, so that it matches the dates in the Boston Crimes dataset
+```{r 7}
+#Filter out Dates that are earlier than "2015-06-22"
+bos_weather <- bos_weather %>% filter(Date > "2015-06-22")
+```
+
+Now that the "Date" columns in the two datasets finally matched, I was able to join the weather dataset onto the Boston crimes dataset, by the "Date" column
+```{r 8}
+#Left join the weather dataset onto crimes dataset, by the "Date" column
+new_crimes <- bos_crimes %>% left_join(bos_weather, by = c("Date"))
+```
+
+I first plotted the Average temperature by number of crimes. While it shows a pattern that there are more crimes when the temperature is between 30 and 75 degrees, it may not be accurate because the dataset is not standardized. It could be true that this is only because it is more common to have 30-75 degree days. This is a starting point however and may be an interesting alteration to make later on. 
+```{r 9}
+# PLot number of total crimes by Average tempurature
+new_crimes %>% group_by(`Avg Temp (F)`) %>% summarize(crime_count = n()) %>% ggplot(aes(x = `Avg Temp (F)`, y = crime_count)) + geom_point() + ylim(0,10000) + geom_smooth() + labs(x = "Average Temperature (F)", y= "Number of Crimes")
+```
+
+Here I created a variable that represents the top 5 crimes in regard to overall count.
+```{r 10}
+#Create a variable that holds the top 5 crimes in relation to count
+top_5_data <- bos_crimes %>% group_by(OFFENSE_CODE_GROUP) %>%
+  summarize(count = n()) %>%
+  filter(rank(desc(count)) <= 5)
+top_5 <- top_5_data$OFFENSE_CODE_GROUP
+```
+
+I then used the top_5 variable to plot average temperature by crime count, but this time by each of the top 5 crimes. They show similar patterns between each crime, which also leads me to beleive that this representation is biased. My initial hypothesis is that the reason there are more crimes recorded for days that are between around 40 and 70 degrees is because there simply more days that have those temperatures.
+```{r 11}
+# Plot top 5 crimes by count
+new_crimes %>% filter(OFFENSE_CODE_GROUP %in% top_5) %>% group_by(`Avg Temp (F)`, OFFENSE_CODE_GROUP) %>% summarize(crime_count = n()) %>% ggplot(aes(x = `Avg Temp (F)`, y = crime_count, color = OFFENSE_CODE_GROUP)) + geom_point() + geom_smooth() + xlim(0,100) + ylim(0,1000) + labs(x = "Average temperature (F)", y = "Number of crimes", title = "Number of top 5 crimes by temperature")
+```
+
+```{r 12}
+#write.csv(new_crimes, "new_crimes.csv")
+```
+In order to test this hypothesis, I decided to compare the total number of crimes in a year to the number of days year with corresponding temperatures. To simplify my comparison, I broke up the Average temperatures into 10 groups: 0-9 degrees, 10-19 degrees, 20-29 degrees, 30-39 degrees, and 40-49 degrees, 50-59 degrees, 60-69 degrees, 70-79 degrees, 80-89 degrees, and 90-99 degrees.
+```{r 13}
+new_crimes <- new_crimes %>% filter(`Avg Temp (F)` != 'NA') %>% transform(temp_group=ifelse((`Avg Temp (F)`<10), "0-9", ifelse((`Avg Temp (F)`>=10) & (`Avg Temp (F)`<20),"10-19", ifelse((`Avg Temp (F)`>=20) & (`Avg Temp (F)`<30), "20-29", ifelse((`Avg Temp (F)`>=30) & (`Avg Temp (F)`<40), "30-39", ifelse((`Avg Temp (F)`>=40) & (`Avg Temp (F)`<50), "40-49", ifelse((`Avg Temp (F)`>=50) & (`Avg Temp (F)`<60), "50-59", ifelse((`Avg Temp (F)`>=60) & (`Avg Temp (F)`<70),"60-69", ifelse((`Avg Temp (F)`>=70) & (`Avg Temp (F)`<80), "70-79", ifelse((`Avg Temp (F)`>=80) & (`Avg Temp (F)`<90), "80-89", ifelse((`Avg Temp (F)`>=90) & (`Avg Temp (F)`<100), "90-99", 0)))))))))))
+```
+
+This represents the number of total crimes for each temperature group in 2017
+```{r 14}
+new_crimes %>% filter(YEAR == 2017) %>% group_by(temp_group) %>% summarize(temp_group_count = n())
+crimes_per_temp <- new_crimes %>% filter(YEAR == 2017) %>% group_by(temp_group) %>% summarize(temp_group_count = n())
+```
+
+A visual representation of the number of total crimes in 2017 by temperature group
+```{r 15}
+# Plot top 5 crimes by count and filter for year 2017 
+new_crimes %>% filter(OFFENSE_CODE_GROUP %in% top_5, YEAR == 2017) %>% group_by(temp_group) %>% summarize(temp_group_count = n()) %>% ggplot(aes(x = temp_group, y = temp_group_count)) + geom_bar(stat="identity", fill="steelblue") + labs(x = "Temperature group", y = "Total number of crimes", title = "Number of crimes by temperature group in 2017")
+```
+
+Now that I separated the total number of crimes in 2017 into temperature groups, I moved on to counting the number of days in 2017 that fell in each temperature group, using the Boston weather dataset.
+```{r 16}
+bos_weather <- bos_weather %>% filter("2016-12-31" < Date & "2018-01-01" > Date) %>% transform(temp_group=ifelse((`Avg Temp (F)`<10), "0-9", ifelse((`Avg Temp (F)`>=10) & (`Avg Temp (F)`<20),"10-19", ifelse((`Avg Temp (F)`>=20) & (`Avg Temp (F)`<30), "20-29", ifelse((`Avg Temp (F)`>=30) & (`Avg Temp (F)`<40), "30-39", ifelse((`Avg Temp (F)`>=40) & (`Avg Temp (F)`<50), "40-49", ifelse((`Avg Temp (F)`>=50) & (`Avg Temp (F)`<60), "50-59", ifelse((`Avg Temp (F)`>=60) & (`Avg Temp (F)`<70),"60-69", ifelse((`Avg Temp (F)`>=70) & (`Avg Temp (F)`<80), "70-79", ifelse((`Avg Temp (F)`>=80) & (`Avg Temp (F)`<90), "80-89", ifelse((`Avg Temp (F)`>=90) & (`Avg Temp (F)`<100), "90-99", 0)))))))))))
+```
+
+
+This represents the number of days for each temperature group in 2017
+```{r 17}
+bos_weather %>% group_by(temp_group) %>% summarize(temp_group_count = n())
+Days_per_temp <- bos_weather %>% group_by(temp_group) %>% summarize(temp_group_count = n())
+```
+
+A visual representation of the number of days for each temperature group in 2017
+```{r 18}
+bos_weather %>% group_by(temp_group) %>% summarize(temp_group_count = n()) %>% ggplot(aes(x = temp_group, y = temp_group_count)) + geom_bar(stat="identity", fill="steelblue") + labs(x = "Temperature group", y= "Days per year", title = "Number of Days in 2017 with each Average temperature group") 
+```
+
+```{r 19}
+Temp_comparison <- Days_per_temp %>% left_join(crimes_per_temp, by = c("temp_group"))
+Temp_comparison
+```
+
+```{r 20}
+Temp_comparison %>% ggplot(aes(x = temp_group_count.x, y = temp_group_count.y)) + geom_point() +  geom_smooth(method='lm') + labs(x = "Number of days per temp group", y= "Number of crimes per temp group", title = "Number of days vs crimes (by temp group) in 2017")
+```
+Based on the summary of this model, there is a low P value of 2.68e-08 and an R squared value of .9902. It is clear that there is a strong positive correlation between the number of days in a year with each temperature group and the number of total crimes per each temperature group. This proves my initial hypothesis that average daily temperature does not have a correlation to the number of crimes commited. 
+```{r 21}
+temp_model <- lm(Temp_comparison$temp_group_count.x~Temp_comparison$temp_group_count.y)
+summary(temp_model)
+```
+
